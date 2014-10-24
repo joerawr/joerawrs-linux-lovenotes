@@ -1,0 +1,229 @@
+
+
+Disable Network Manager
+http://xmodulo.com/disable-network-manager-linux.html
+
+Bonding
+http://delightlylinux.wordpress.com/2014/07/12/speed-up-your-home-network-with-link-aggregation-in-linux-mint-17-and-xubuntu-14-04/
+
+If I get it working:
+http://forums.linuxmint.com/viewtopic.php?f=150&t=178023&p=922249&hilit=bonding#p922249
+
+BEGIN
+
+Before starting make sure you:
+- you can get an IP and surf via your ethernet jack.
+- you can get an IP and surf via your wireless card. Use the Network manager gui to connect to your wifi network.
+
+Now let's get dirty.
+
+Disable Network manager.  This will kill your internet so have all your notes loaded up on another computer or your phone/tablet.
+
+sudo stop network-manager
+echo "manual" | sudo tee /etc/init/network-manager.override
+
+Setup Static IP for eth0
+
+sudo vi /etc/network/interfaces
+$ cat /etc/network/interfaces
+# interfaces(5) file used by ifup(8) and ifdown(8)
+auto eth0
+iface eth0 inet static
+	address 192.168.1.111
+	gateway 192.168.1.1
+	netmask 255.255.255.0
+	network 192.168.1.0
+	broadcast 192.168.1.255
+	dns-nameservers 192.168.1.1
+
+reboot to really test it:
+sudo reboot
+
+Now that eth0 static is working, let's setup wlan0
+
+Setup Static IP for wlan0
+
+[OPTIONAL: setup wlan0 first with dhcp... might be easier to sort out than going straight to static]
+
+
+sudo vi /etc/init.d/networking
+# wireless
+auto wlan0
+iface wlan0 inet dhcp
+wpa-ssid "[myssid]"
+wpa-psk "[mypass]"
+
+
+reboot (pull out the cat5 cable to ensure you're testing the wifi)
+
+If that works, move on to static test:
+sudo vi /etc/init.d/networking
+
+# wireless
+auto wlan0
+iface wlan0 inet static
+	wpa-ssid "[myssid]"
+	wpa-psk "[mypass]"
+        address 192.168.1.112
+        gateway 192.168.1.1
+        netmask 255.255.255.0
+        network 192.168.1.0
+        broadcast 192.168.1.255
+        dns-nameservers 192.168.1.1
+
+reboot (pull out the cat5 cable to ensure you're testing the wifi)
+
+
+So now eth0 and wlan0 both work.  Before proceeding, copy /etc/network/interfaces to a safe place!
+eg: cp /etc/network/interfaces ~/backupfiles/interfaces.good
+
+sudo apt-get install ifenslave
+
+Add "bonding" to /etc/modules
+
+Should look something like this:
+$ sudo cat /etc/modules
+# /etc/modules: kernel modules to load at boot time.
+#
+# This file contains the names of kernel modules that should be loaded
+# at boot time, one per line. Lines beginning with "#" are ignored.
+# Parameters can be specified after the module name.
+
+lp
+rtc
+bonding
+
+
+sudo vi /etc/network/interfaces to configure network interfaces.
+
+$ cat /etc/network/interfaces 
+auto lo eth0 wlan0 bond0
+
+iface lo inet loopback
+
+iface eth0 inet manual
+bond-master bond0
+bond-primary eth0 wlan0
+
+iface wlan0 inet manual
+wpa-ssid "[myssid]"
+wpa-psk "[mypass]"
+bond-master bond0
+bond-primary eth0 wlan0
+
+iface bond0 inet static
+bond_mode active-backup
+bond-miimon 100
+bond-primary eth0
+slaves eth0 wlan0
+address 192.168.1.113
+gateway 192.168.1.1
+netmask 255.255.255.0
+network 192.168.1.0
+broadcast 192.168.1.255
+dns-nameservers 192.168.1.1
+
+END
+
+Some verification and trouble shooting commands:
+
+working example of wlan0 bonding
+$ sudo iwconfig
+bond0     no wireless extensions.
+
+eth0      no wireless extensions.
+
+lo        no wireless extensions.
+
+wlan0     IEEE 802.11abgn  ESSID:"HouseOfRawr"  
+          Mode:Managed  Frequency:2.422 GHz  Access Point: 28:C6:8E:8D:86:49   
+          Bit Rate=52 Mb/s   Tx-Power=19 dBm   
+          Retry  long limit:7   RTS thr:off   Fragment thr:off
+          Encryption key:off
+          Power Management:off
+          Link Quality=57/70  Signal level=-53 dBm  
+          Rx invalid nwid:0  Rx invalid crypt:0  Rx invalid frag:0
+          Tx excessive retries:0  Invalid misc:70   Missed beacon:0
+
+$ cat /proc/net/bonding/bond0 (wlan0 up, eth0 down)
+Ethernet Channel Bonding Driver: v3.7.1 (April 27, 2011)
+
+Bonding Mode: fault-tolerance (active-backup)
+Primary Slave: eth0 (primary_reselect always)
+Currently Active Slave: wlan0
+MII Status: up
+MII Polling Interval (ms): 100
+Up Delay (ms): 0
+Down Delay (ms): 0
+
+Slave Interface: wlan0
+MII Status: up
+Speed: Unknown
+Duplex: Unknown
+Link Failure Count: 0
+Permanent HW addr: 5c:ac:4c:07:0e:83
+Slave queue ID: 0
+
+Slave Interface: eth0
+MII Status: down
+Speed: Unknown
+Duplex: Unknown
+Link Failure Count: 0
+Permanent HW addr: 00:26:b9:eb:eb:98
+Slave queue ID: 0
+
+$ cat /proc/net/bonding/bond0 (wlan0 up, eth0 up)
+Ethernet Channel Bonding Driver: v3.7.1 (April 27, 2011)
+
+Bonding Mode: fault-tolerance (active-backup)
+Primary Slave: eth0 (primary_reselect always)
+Currently Active Slave: eth0
+MII Status: up
+MII Polling Interval (ms): 100
+Up Delay (ms): 0
+Down Delay (ms): 0
+
+Slave Interface: wlan0
+MII Status: up
+Speed: Unknown
+Duplex: Unknown
+Link Failure Count: 0
+Permanent HW addr: 5c:ac:4c:07:0e:83
+Slave queue ID: 0
+
+Slave Interface: eth0
+MII Status: up
+Speed: 1000 Mbps
+Duplex: full
+Link Failure Count: 0
+Permanent HW addr: 00:26:b9:eb:eb:98
+Slave queue ID: 0
+
+
+$ cat /proc/net/bonding/bond0 (wlan0 down, eth0 up)
+Ethernet Channel Bonding Driver: v3.7.1 (April 27, 2011)
+
+Bonding Mode: fault-tolerance (active-backup)
+Primary Slave: eth0 (primary_reselect always)
+Currently Active Slave: eth0
+MII Status: up
+MII Polling Interval (ms): 100
+Up Delay (ms): 0
+Down Delay (ms): 0
+
+Slave Interface: wlan0
+MII Status: down
+Speed: Unknown
+Duplex: Unknown
+Link Failure Count: 1
+Permanent HW addr: 5c:ac:4c:07:0e:83
+Slave queue ID: 0
+
+Slave Interface: eth0
+MII Status: up
+Speed: 1000 Mbps
+Duplex: full
+Link Failure Count: 0
+Permanent HW addr: 00:26:b9:eb:eb:98
+Slave queue ID: 0
+
